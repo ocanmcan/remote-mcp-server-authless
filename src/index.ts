@@ -59,17 +59,111 @@ export class MyMCP extends McpAgent {
 }
 
 export default {
-	fetch(request: Request, env: Env, ctx: ExecutionContext) {
+	async fetch(request: Request, env: Env, ctx: ExecutionContext) {
 		const url = new URL(request.url);
+		
+		// Enhanced logging
+		console.log(`🔧 Incoming request: ${request.method} ${url.pathname}`);
+		console.log(`🔧 Full URL: ${url.toString()}`);
+		
+		try {
+			// Handle CORS preflight requests
+			if (request.method === 'OPTIONS') {
+				return new Response(null, {
+					status: 200,
+					headers: {
+						'Access-Control-Allow-Origin': '*',
+						'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+						'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+					},
+				});
+			}
 
-		if (url.pathname === "/sse" || url.pathname === "/sse/message") {
-			return MyMCP.serveSSE("/sse").fetch(request, env, ctx);
+			// SSE endpoints
+			if (url.pathname === "/sse" || url.pathname === "/sse/message") {
+				console.log("🔧 Routing to SSE handler");
+				return MyMCP.serveSSE("/sse").fetch(request, env, ctx);
+			}
+			
+			// MCP endpoints - handle various path variations
+			if (url.pathname === "/mcp" || 
+				url.pathname === "/mcp/" || 
+				url.pathname.startsWith("/mcp/")) {
+				console.log("🔧 Routing to MCP handler");
+				
+				try {
+					const response = await MyMCP.serve("/mcp").fetch(request, env, ctx);
+					console.log(`🔧 MCP handler response status: ${response.status}`);
+					
+					// Add CORS headers to MCP responses
+					const headers = new Headers(response.headers);
+					headers.set('Access-Control-Allow-Origin', '*');
+					headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+					headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+					
+					return new Response(response.body, {
+						status: response.status,
+						statusText: response.statusText,
+						headers: headers,
+					});
+				} catch (error) {
+					console.error("🔧 MCP handler error:", error);
+					return new Response(JSON.stringify({
+						error: "MCP handler failed",
+						details: error.message
+					}), {
+						status: 500,
+						headers: {
+							'Content-Type': 'application/json',
+							'Access-Control-Allow-Origin': '*',
+						},
+					});
+				}
+			}
+			
+			// Health check endpoint
+			if (url.pathname === "/health" || url.pathname === "/") {
+				return new Response(JSON.stringify({
+					status: "healthy",
+					server: "Authless Calculator MCP Server",
+					version: "1.0.0",
+					endpoints: {
+						mcp: "/mcp",
+						sse: "/sse"
+					}
+				}), {
+					headers: {
+						'Content-Type': 'application/json',
+						'Access-Control-Allow-Origin': '*',
+					},
+				});
+			}
+			
+			console.log(`🔧 No route matched for: ${url.pathname}`);
+			return new Response(JSON.stringify({
+				error: "Not found",
+				path: url.pathname,
+				available_endpoints: ["/mcp", "/sse", "/health"]
+			}), {
+				status: 404,
+				headers: {
+					'Content-Type': 'application/json',
+					'Access-Control-Allow-Origin': '*',
+				},
+			});
+			
+		} catch (error) {
+			console.error("🔧 Request handling error:", error);
+			return new Response(JSON.stringify({
+				error: "Internal server error",
+				details: error.message
+			}), {
+				status: 500,
+				headers: {
+					'Content-Type': 'application/json',
+					'Access-Control-Allow-Origin': '*',
+				},
+			});
 		}
-
-		if (url.pathname === "/mcp") {
-			return MyMCP.serve("/mcp").fetch(request, env, ctx);
-		}
-
-		return new Response("Not found", { status: 404 });
 	},
 };
