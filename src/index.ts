@@ -1,14 +1,12 @@
 import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-
 // Define our MCP agent with tools
 export class MyMCP extends McpAgent {
 	server = new McpServer({
 		name: "Authless Calculator",
 		version: "1.0.0",
 	});
-
 	async init() {
 		// Simple addition tool
 		this.server.tool(
@@ -18,7 +16,6 @@ export class MyMCP extends McpAgent {
 				content: [{ type: "text", text: String(a + b) }],
 			})
 		);
-
 		// Calculator tool with multiple operations
 		this.server.tool(
 			"calculate",
@@ -57,19 +54,15 @@ export class MyMCP extends McpAgent {
 		);
 	}
 }
-
 export default {
 	fetch(request: Request, env: Env, ctx: ExecutionContext) {
 		const url = new URL(request.url);
-		
 		if (url.pathname === "/sse" || url.pathname === "/sse/message") {
 			return MyMCP.serveSSE("/sse").fetch(request, env, ctx);
 		}
-		
 		if (url.pathname === "/mcp") {
 			return MyMCP.serve("/mcp").fetch(request, env, ctx);
 		}
-		
 		return new Response("Not found", { status: 404 });
 	},
 };
