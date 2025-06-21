@@ -10,37 +10,57 @@ export class MyMCP extends McpAgent {
 	});
 
 	async init() {
+		console.log("🔧 Initializing MCP server with tools...");
+		
 		// Simple addition tool
 		this.server.tool(
 			"add",
-			{ a: z.number(), b: z.number() },
-			async ({ a, b }) => ({
-				content: [{ type: "text", text: String(a + b) }],
-			})
+			{ 
+				a: z.number().describe("First number to add"), 
+				b: z.number().describe("Second number to add") 
+			},
+			async ({ a, b }) => {
+				console.log(`🔧 Executing ADD tool: ${a} + ${b}`);
+				const result = a + b;
+				console.log(`🔧 ADD result: ${result}`);
+				return {
+					content: [{ 
+						type: "text", 
+						text: `${a} + ${b} = ${result}` 
+					}],
+				};
+			}
 		);
 
 		// Calculator tool with multiple operations
 		this.server.tool(
 			"calculate",
 			{
-				operation: z.enum(["add", "subtract", "multiply", "divide"]),
-				a: z.number(),
-				b: z.number(),
+				operation: z.enum(["add", "subtract", "multiply", "divide"]).describe("Mathematical operation to perform"),
+				a: z.number().describe("First number"),
+				b: z.number().describe("Second number"),
 			},
 			async ({ operation, a, b }) => {
+				console.log(`🔧 Executing CALCULATE tool: ${a} ${operation} ${b}`);
 				let result: number;
+				let operationSymbol: string;
+				
 				switch (operation) {
 					case "add":
 						result = a + b;
+						operationSymbol = "+";
 						break;
 					case "subtract":
 						result = a - b;
+						operationSymbol = "-";
 						break;
 					case "multiply":
 						result = a * b;
+						operationSymbol = "×";
 						break;
 					case "divide":
-						if (b === 0)
+						if (b === 0) {
+							console.log("🔧 Division by zero error");
 							return {
 								content: [
 									{
@@ -49,12 +69,23 @@ export class MyMCP extends McpAgent {
 									},
 								],
 							};
+						}
 						result = a / b;
+						operationSymbol = "÷";
 						break;
 				}
-				return { content: [{ type: "text", text: String(result) }] };
+				
+				console.log(`🔧 CALCULATE result: ${result}`);
+				return { 
+					content: [{ 
+						type: "text", 
+						text: `${a} ${operationSymbol} ${b} = ${result}` 
+					}] 
+				};
 			}
 		);
+
+		console.log("🔧 MCP server initialization complete");
 	}
 }
 
@@ -64,7 +95,6 @@ export default {
 		
 		// Enhanced logging
 		console.log(`🔧 Incoming request: ${request.method} ${url.pathname}`);
-		console.log(`🔧 Full URL: ${url.toString()}`);
 		
 		try {
 			// Handle CORS preflight requests
@@ -75,6 +105,7 @@ export default {
 						'Access-Control-Allow-Origin': '*',
 						'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
 						'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+						'Access-Control-Max-Age': '86400',
 					},
 				});
 			}
@@ -82,7 +113,17 @@ export default {
 			// SSE endpoints
 			if (url.pathname === "/sse" || url.pathname === "/sse/message") {
 				console.log("🔧 Routing to SSE handler");
-				return MyMCP.serveSSE("/sse").fetch(request, env, ctx);
+				const response = await MyMCP.serveSSE("/sse").fetch(request, env, ctx);
+				
+				// Add CORS headers
+				const headers = new Headers(response.headers);
+				headers.set('Access-Control-Allow-Origin', '*');
+				
+				return new Response(response.body, {
+					status: response.status,
+					statusText: response.statusText,
+					headers: headers,
+				});
 			}
 			
 			// MCP endpoints - handle various path variations
@@ -91,32 +132,68 @@ export default {
 				url.pathname.startsWith("/mcp/")) {
 				console.log("🔧 Routing to MCP handler");
 				
-				try {
+				// Log request body for debugging
+				if (request.method === 'POST') {
+					const body = await request.text();
+					console.log("🔧 Request body:", body);
+					
+					// Create new request with the body
+					const newRequest = new Request(request.url, {
+						method: request.method,
+						headers: request.headers,
+						body: body,
+					});
+					
+					try {
+						const response = await MyMCP.serve("/mcp").fetch(newRequest, env, ctx);
+						console.log(`🔧 MCP handler response status: ${response.status}`);
+						
+						// Log response body for debugging
+						const responseText = await response.text();
+						console.log("🔧 Response body:", responseText);
+						
+						// Add CORS headers to MCP responses
+						return new Response(responseText, {
+							status: response.status,
+							statusText: response.statusText,
+							headers: {
+								'Content-Type': 'application/json',
+								'Access-Control-Allow-Origin': '*',
+								'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+								'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+							},
+						});
+					} catch (error) {
+						console.error("🔧 MCP handler error:", error);
+						return new Response(JSON.stringify({
+							jsonrpc: "2.0",
+							error: {
+								code: -32603,
+								message: "Internal error",
+								data: error.message
+							},
+							id: null
+						}), {
+							status: 500,
+							headers: {
+								'Content-Type': 'application/json',
+								'Access-Control-Allow-Origin': '*',
+							},
+						});
+					}
+				} else {
+					// Handle GET requests to MCP endpoint
 					const response = await MyMCP.serve("/mcp").fetch(request, env, ctx);
 					console.log(`🔧 MCP handler response status: ${response.status}`);
 					
-					// Add CORS headers to MCP responses
+					// Add CORS headers
 					const headers = new Headers(response.headers);
 					headers.set('Access-Control-Allow-Origin', '*');
-					headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-					headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 					
 					return new Response(response.body, {
 						status: response.status,
 						statusText: response.statusText,
 						headers: headers,
-					});
-				} catch (error) {
-					console.error("🔧 MCP handler error:", error);
-					return new Response(JSON.stringify({
-						error: "MCP handler failed",
-						details: error.message
-					}), {
-						status: 500,
-						headers: {
-							'Content-Type': 'application/json',
-							'Access-Control-Allow-Origin': '*',
-						},
 					});
 				}
 			}
@@ -127,10 +204,13 @@ export default {
 					status: "healthy",
 					server: "Authless Calculator MCP Server",
 					version: "1.0.0",
+					tools: ["add", "calculate"],
 					endpoints: {
 						mcp: "/mcp",
-						sse: "/sse"
-					}
+						sse: "/sse",
+						health: "/health"
+					},
+					timestamp: new Date().toISOString()
 				}), {
 					headers: {
 						'Content-Type': 'application/json',
@@ -155,8 +235,13 @@ export default {
 		} catch (error) {
 			console.error("🔧 Request handling error:", error);
 			return new Response(JSON.stringify({
-				error: "Internal server error",
-				details: error.message
+				jsonrpc: "2.0",
+				error: {
+					code: -32603,
+					message: "Internal server error",
+					data: error.message
+				},
+				id: null
 			}), {
 				status: 500,
 				headers: {
